@@ -1,0 +1,8 @@
+pydantic>=2.0
+langchain
+langchain-core
+langchain-groq
+python-dotenv
+fastapi
+uvicorn
+langchain-openai
