@@ -3,7 +3,7 @@ import PromptInput from './components/PromptInput';
 import EndpointTable from './components/EndpointTable';
 import GapDetector from './components/GapDetector';
 import RelationshipGraph from './components/RelationshipGraph';
-import { generateEndpoints } from './api/client';
+import { generateEndpoints, refineEndpoints } from './api/client';
 
 // Hand-crafted SVG Icons for professional design
 const Icons = {
@@ -33,6 +33,39 @@ export default function App() {
   const [searchTerm, setSearchTerm] = useState('');
 
   const [activeModel, setActiveModel] = useState('gemini-2.5-flash');
+
+  const [refinementInput, setRefinementInput] = useState('');
+  const [refining, setRefining] = useState(false);
+  const [chatHistory, setChatHistory] = useState([]);
+
+  const handleRefine = async (e) => {
+    e.preventDefault();
+    if (!refinementInput.trim() || !result) return;
+
+    const userMsg = refinementInput.trim();
+    setRefinementInput('');
+    setRefining(true);
+    setError(null);
+
+    setChatHistory((prev) => [...prev, { sender: 'user', text: userMsg }]);
+
+    try {
+      const data = await refineEndpoints(result.endpoints, userMsg);
+      setResult(data);
+      setChatHistory((prev) => [
+        ...prev,
+        { sender: 'assistant', text: `Successfully updated the schema! \n\n${data.summary}` }
+      ]);
+    } catch (err) {
+      setError(err.message || 'An error occurred while refining the API design.');
+      setChatHistory((prev) => [
+        ...prev,
+        { sender: 'assistant', text: `❌ Failed to update the schema: ${err.message}` }
+      ]);
+    } finally {
+      setRefining(false);
+    }
+  };
 
   // Ping backend to show status in the header
   useEffect(() => {
@@ -241,6 +274,67 @@ export default function App() {
                       <p className="summary-text">{result.summary}</p>
                     </div>
                   )}
+
+                  {/* Refinement Chat Section */}
+                  <div style={{ marginTop: '2rem', borderTop: '1px solid var(--border-color)', paddingTop: '2rem' }}>
+                    <h3 className="section-title" style={{ fontSize: '1.1rem', marginBottom: '0.5rem' }}>Iterative Design Refiner</h3>
+                    <p className="success-description" style={{ fontSize: '0.85rem', marginBottom: '1.25rem' }}>Ask the AI to add, modify, or delete endpoints from the current schema.</p>
+                    
+                    {chatHistory.length > 0 && (
+                      <div style={{ background: 'var(--bg-input)', borderRadius: 'var(--radius-md)', padding: '1rem', marginBottom: '1rem', maxHeight: '250px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.75rem', border: '1px solid var(--border-color)' }}>
+                        {chatHistory.map((chat, idx) => (
+                          <div key={idx} style={{ 
+                            alignSelf: chat.sender === 'user' ? 'flex-end' : 'flex-start',
+                            background: chat.sender === 'user' ? 'rgba(99, 102, 241, 0.25)' : 'rgba(255, 255, 255, 0.05)',
+                            padding: '0.75rem 1rem',
+                            borderRadius: '12px',
+                            maxWidth: '85%',
+                            fontSize: '0.9rem',
+                            border: chat.sender === 'user' ? '1px solid rgba(99, 102, 241, 0.4)' : '1px solid var(--border-color)',
+                            color: 'white'
+                          }}>
+                            <strong>{chat.sender === 'user' ? 'You' : 'AI Architect'}:</strong>
+                            <p style={{ marginTop: '0.25rem', whiteSpace: 'pre-wrap', lineHeight: '1.4' }}>{chat.text}</p>
+                          </div>
+                        ))}
+                        {refining && (
+                          <div style={{ alignSelf: 'flex-start', background: 'rgba(255, 255, 255, 0.05)', padding: '0.75rem 1rem', borderRadius: '12px', fontSize: '0.9rem', color: 'var(--color-text-muted)', border: '1px solid var(--border-color)' }}>
+                            <span className="spinner-small" style={{ marginRight: '8px', display: 'inline-block', verticalAlign: 'middle' }}></span>
+                            Refining schema design...
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <form onSubmit={handleRefine} style={{ display: 'flex', gap: '0.5rem' }}>
+                      <input
+                        type="text"
+                        placeholder="e.g., Add an admin route to suspend user accounts..."
+                        value={refinementInput}
+                        onChange={(e) => setRefinementInput(e.target.value)}
+                        disabled={refining}
+                        style={{
+                          flex: 1,
+                          background: 'var(--bg-input)',
+                          border: '1px solid var(--border-color)',
+                          borderRadius: 'var(--radius-sm)',
+                          padding: '0.75rem 1rem',
+                          color: 'white',
+                          fontFamily: 'var(--font-sans)',
+                          fontSize: '0.95rem',
+                          outline: 'none',
+                        }}
+                      />
+                      <button 
+                        type="submit" 
+                        className="btn-primary" 
+                        disabled={refining || !refinementInput.trim()}
+                        style={{ padding: '0.75rem 1.5rem', background: 'linear-gradient(135deg, var(--primary-color) 0%, #8b5cf6 100%)', border: 'none', borderRadius: 'var(--radius-sm)', color: 'white', fontWeight: 'bold', cursor: 'pointer' }}
+                      >
+                        {refining ? 'Refining...' : 'Refine'}
+                      </button>
+                    </form>
+                  </div>
                 </div>
               )}
             </div>

@@ -7,8 +7,8 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 
-from agent import run_agent
-from schemas import PromptRequest, GenerateResponse
+from agent import run_agent, refine_agent
+from schemas import PromptRequest, GenerateResponse, RefineRequest
 
 app = FastAPI(
     title="REST API Schema Generator Service",
@@ -90,6 +90,34 @@ def generate_schema(request: PromptRequest):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to generate API schema: {str(e)}"
+        )
+
+@app.post("/refine", response_model=GenerateResponse, status_code=status.HTTP_200_OK)
+def refine_schema(request: RefineRequest):
+    """
+    Refines an existing API design using the LangChain agent with a prompt.
+    Runs CRUD gap analysis, REST lint checks, and resource relationship mapping on the updated design.
+    """
+    prompt = request.prompt.strip()
+    if not prompt:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The refinement prompt cannot be empty."
+        )
+
+    # Convert Pydantic Endpoint models to dictionaries
+    endpoints_list = [ep.dict() for ep in request.endpoints]
+
+    try:
+        # Call the refiner agent logic
+        result = refine_agent(endpoints_list, prompt)
+        return result
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to refine API schema: {str(e)}"
         )
 
 if __name__ == "__main__":

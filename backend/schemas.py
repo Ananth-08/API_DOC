@@ -96,3 +96,11 @@ class GenerateResponse(BaseModel):
         description="A high-level summary of the generated schema/report"
     )
 
+
+class RefineRequest(BaseModel):
+    """
+    The request payload containing the current endpoints and the refinement command.
+    """
+    endpoints: List[Endpoint] = Field(..., description="The current endpoints list")
+    prompt: str = Field(..., min_length=1, description="The refinement instruction command")
+

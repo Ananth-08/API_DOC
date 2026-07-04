@@ -537,6 +537,129 @@ Summarize what resources are defined, how they relate, and mention any gaps or l
 
     return result_dict
 
+def refine_agent(current_endpoints: list, refinement_prompt: str) -> dict:
+    """
+    Refines the current list of REST endpoints based on a user instruction.
+    Regenerates the summary and runs the local Python tools on the updated list.
+    """
+    endpoints_json = json.dumps(current_endpoints, indent=2)
+    
+    refine_prompt = f"""You are an expert REST API designer.
+You are given the current list of REST endpoints for a system:
+
+Current Endpoints:
+{endpoints_json}
+
+The user wants to modify, add, delete, or refine these endpoints with the following instruction:
+"{refinement_prompt}"
+
+To satisfy this, return ONLY a valid JSON array of dictionaries representing the complete updated list of endpoints. Each dictionary must have exactly:
+- "method": HTTP method in uppercase (GET, POST, PUT, DELETE, PATCH, etc.)
+- "route": Route path starting with a forward slash (e.g. /users/{{id}})
+- "description": A string description of what the endpoint does
+- "auth_required": A boolean value (true or false) indicating if authentication/authorization is required to access the endpoint
+
+Your response must contain ONLY the raw JSON array of the updated endpoints.
+Do not include any explanations, markdown boxes, or extra text.
+"""
+    
+    response_text = invoke_with_fallback(refine_prompt)
+    
+    if isinstance(response_text, list):
+        parts = []
+        for part in response_text:
+            if isinstance(part, dict) and "text" in part:
+                parts.append(part["text"])
+            elif isinstance(part, str):
+                parts.append(part)
+        response_text = "".join(parts)
+    elif not isinstance(response_text, str):
+        response_text = str(response_text)
+        
+    try:
+        updated_endpoints = extract_json(response_text)
+    except Exception as e:
+        updated_endpoints = current_endpoints
+        
+    if not isinstance(updated_endpoints, list):
+        if isinstance(updated_endpoints, dict) and "endpoints" in updated_endpoints:
+            updated_endpoints = updated_endpoints["endpoints"]
+        else:
+            updated_endpoints = current_endpoints
+
+    # Deterministic Local Processing using Python tools on the updated endpoints
+    gaps = detect_crud_gaps(updated_endpoints)
+    violations = lint_endpoints(updated_endpoints)
+    relationships = detect_relationships(updated_endpoints)
+    
+    # Second LLM Call: Generate an updated summary
+    endpoints_json_updated = json.dumps(updated_endpoints, indent=2)
+    gaps_json = json.dumps(gaps, indent=2)
+    violations_json = json.dumps(violations, indent=2)
+    relationships_json = json.dumps(relationships, indent=2)
+    
+    summary_prompt = f"""You are an expert REST API designer.
+Generate a concise high-level text summary of the following updated API design and verification results:
+
+Endpoints:
+{endpoints_json_updated}
+
+Identified CRUD Gaps:
+{gaps_json}
+
+REST Lint Violations:
+{violations_json}
+
+Resource Relationships:
+{relationships_json}
+
+Summarize what resources are defined, how they relate, and mention any gaps or lint violations found.
+"""
+    
+    try:
+        summary = invoke_with_fallback(summary_prompt)
+    except Exception as e:
+        summary = f"API specification refined successfully. (Failed to generate summary: {str(e)})"
+        
+    if not isinstance(summary, str):
+        summary = str(summary)
+        
+    # Build final result dictionary
+    result_dict = {
+        "endpoints": updated_endpoints,
+        "gaps": gaps,
+        "violations": violations,
+        "relationships": relationships,
+        "summary": summary
+    }
+
+    # Post-process to ensure all required fields are present and correctly typed
+    if isinstance(result_dict, dict):
+        if "endpoints" in result_dict and isinstance(result_dict["endpoints"], list):
+            for ep in result_dict["endpoints"]:
+                if isinstance(ep, dict):
+                    if "auth_required" not in ep:
+                        # Infer auth_required based on description or path, or default to false
+                        desc_lower = ep.get("description", "").lower()
+                        route_lower = ep.get("route", "").lower()
+                        if any(x in route_lower or x in desc_lower for x in ["admin", "secure", "auth", "private", "me", "profile"]):
+                            ep["auth_required"] = True
+                        else:
+                            ep["auth_required"] = False
+                    else:
+                        ep["auth_required"] = bool(ep["auth_required"])
+                        
+        if "gaps" not in result_dict or not isinstance(result_dict["gaps"], list):
+            result_dict["gaps"] = []
+        if "violations" not in result_dict or not isinstance(result_dict["violations"], list):
+            result_dict["violations"] = []
+        if "relationships" not in result_dict or not isinstance(result_dict["relationships"], list):
+            result_dict["relationships"] = []
+        if "summary" not in result_dict or not isinstance(result_dict["summary"], str):
+            result_dict["summary"] = "API specification refined successfully."
+
+    return result_dict
+
 def extract_json(text: str) -> any:
     """Helper to extract a JSON block (object or array) from the agent's output."""
     text_clean = text.strip()
